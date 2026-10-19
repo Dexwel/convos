@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ConvoSurvey admin</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/base.css">
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="card" autocomplete="on">
+      <h1>ConvoSurvey</h1>
+      <p class="muted">Sign in to build surveys and read responses.</p>
+      <div class="field">
+        <label for="pw">Admin password</label>
+        <input id="pw" type="password" autocomplete="current-password" required>
+      </div>
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header class="nav">
+      <a class="brand" href="#/">ConvoSurvey</a>
+      <nav>
+        <a class="btn ghost sm" href="#/">Surveys</a>
+        <button id="logout" class="btn ghost sm" type="button">Sign out</button>
+      </nav>
+    </header>
+    <div id="banner" class="banner" hidden></div>
+    <main id="view" class="view"></main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/admin.js"></script>
+</body>
+</html>

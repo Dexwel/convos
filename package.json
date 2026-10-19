@@ -1,0 +1,21 @@
+{
+  "name": "convosurvey",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/match.test.js",
+    "test:e2e": "node test/e2e.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.3.0",
+    "multer": "^2.4.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

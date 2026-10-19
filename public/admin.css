@@ -1,0 +1,87 @@
+.muted { color: var(--muted); }
+.error { color: var(--danger); font-size: 14px; font-weight: 500; }
+
+.login { min-height: 100dvh; display: grid; place-items: center; padding: 20px; }
+.card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 32px; box-shadow: var(--shadow); display: grid; gap: 16px; }
+
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--ink); text-decoration: none; letter-spacing: -0.02em; }
+.nav nav { display: flex; gap: 4px; }
+.banner { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); border-bottom: 1px solid var(--line); padding: 10px 24px; font-size: 14px; }
+.banner b { font-weight: 600; }
+
+.view { max-width: 980px; margin: 0 auto; padding: 28px 24px 80px; display: grid; gap: 22px; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.page-head h1 { font-size: clamp(24px, 4vw, 32px); }
+.page-head .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; display: grid; gap: 16px; }
+.panel > h2 { font-size: 18px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* survey list */
+.survey-list { display: grid; gap: 10px; }
+.survey-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.survey-row h3 { font-size: 17px; }
+.survey-row .meta { color: var(--muted); font-size: 14px; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
+.survey-row .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.empty { text-align: center; padding: 48px 20px; background: var(--surface); border: 1px dashed var(--line); border-radius: 16px; display: grid; gap: 12px; justify-items: center; }
+
+/* question builder */
+.q-list { display: grid; gap: 12px; }
+.q-card { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; background: var(--bg); }
+.q-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.q-head .num { font-family: var(--font-display); font-weight: 700; min-width: 26px; }
+.q-head select { width: auto; flex: 0 0 auto; }
+.q-head .spacer { flex: 1; }
+.q-head label.inline { display: flex; gap: 6px; align-items: center; font-size: 14px; font-weight: 500; }
+.q-head input[type="checkbox"], .inline-check input { width: 18px; height: 18px; accent-color: var(--primary); }
+.q-extra { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.q-extra .wide { grid-column: 1 / -1; }
+.inline-check { display: flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 500; }
+
+.share { display: flex; gap: 8px; }
+.share input { flex: 1; font-size: 14px; }
+
+/* results */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.tile .v { font-family: var(--font-display); font-size: 30px; font-weight: 700; line-height: 1.1; }
+.tile .k { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.qstat { display: grid; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.qstat:last-child { border-bottom: 0; padding-bottom: 0; }
+.qstat h3 { font-size: 16px; font-family: var(--font-body); font-weight: 600; letter-spacing: 0; }
+.bars { display: grid; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: minmax(80px, 200px) 1fr 70px; gap: 10px; align-items: center; font-size: 14px; }
+.bar-row .track { height: 12px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.bar-row .fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.bar-row .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-row .lbl { overflow-wrap: anywhere; }
+.summary { white-space: pre-wrap; background: var(--bg); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 8px; font-size: 14px; }
+
+.resp { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.resp > summary { list-style: none; cursor: pointer; padding: 12px 16px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.resp > summary::-webkit-details-marker { display: none; }
+.resp[open] > summary { border-bottom: 1px solid var(--line); }
+.resp .when { font-weight: 600; font-size: 14px; }
+.resp .snippet { color: var(--muted); font-size: 14px; flex: 1; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transcript { padding: 14px 16px 16px; display: grid; gap: 14px; }
+.t-item .p { color: var(--muted); font-size: 13px; }
+.t-item .a { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.t-item.followup { border-left: 3px solid var(--accent); padding-left: 12px; }
+.t-item audio { width: 100%; max-width: 420px; height: 36px; margin-top: 6px; }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-weight: 500; box-shadow: var(--shadow); z-index: 20; max-width: 90vw; }
+
+@media (max-width: 720px) {
+  .grid2, .q-extra { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .survey-row { grid-template-columns: 1fr; }
+  .survey-row .actions { justify-content: flex-start; }
+  .view { padding: 20px 14px 60px; }
+  .nav { padding: 10px 14px; }
+  .bar-row { grid-template-columns: 90px 1fr 56px; }
+}
+
+.designer { border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); background: color-mix(in srgb, var(--primary-soft) 40%, var(--surface)); }

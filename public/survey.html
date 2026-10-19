@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Survey</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/base.css">
+  <link rel="stylesheet" href="/survey.css">
+</head>
+<body>
+  <div id="screen-error" class="center-screen" hidden>
+    <div class="card">
+      <h1 id="error-title">Survey unavailable</h1>
+      <p id="error-text" class="muted"></p>
+    </div>
+  </div>
+
+  <div id="screen-intro" class="center-screen" hidden>
+    <div class="card intro">
+      <p class="preview-banner" id="preview-banner-intro" hidden>Test preview: your answers will not be counted.</p>
+      <h1 id="intro-title"></h1>
+      <p id="intro-desc" class="muted"></p>
+      <p id="intro-meta" class="hint"></p>
+      <div id="prefs" class="prefs" hidden>
+        <p class="label">How would you like to answer?</p>
+        <label class="check"><input type="checkbox" id="pref-listen"><span>Read the questions and options aloud to me</span></label>
+        <label class="check" id="pref-hands-wrap" hidden><input type="checkbox" id="pref-hands"><span>Hands-free: I will speak my answers and move through by voice</span></label>
+      </div>
+      <div id="intro-consent" class="consent" hidden>
+        <p id="consent-text"></p>
+        <label class="check">
+          <input type="checkbox" id="consent-check">
+          <span>I understand and agree to take part.</span>
+        </label>
+      </div>
+      <button id="start-btn" class="btn primary" type="button">Start the conversation</button>
+      <p id="intro-error" class="error" role="alert" hidden></p>
+    </div>
+  </div>
+
+  <div id="screen-chat" class="chat" hidden>
+    <header class="top">
+      <div class="top-row">
+        <h1 id="chat-title"></h1>
+        <div class="top-tools">
+          <span id="progress-label" class="hint"></span>
+          <button id="tts-toggle" class="btn ghost sm icon-only" type="button" aria-pressed="false" aria-label="Read questions aloud" hidden></button>
+        </div>
+      </div>
+      <p class="preview-banner" id="preview-banner" hidden>Test preview: your answers will not be counted.</p>
+      <div class="bar" role="progressbar" aria-label="Survey progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="bar-fill"></span></div>
+    </header>
+    <main id="log" class="log" aria-live="polite" aria-relevant="additions"></main>
+    <footer id="composer" class="composer">
+      <p id="composer-error" class="error" role="alert" hidden></p>
+      <div id="composer-body"></div>
+    </footer>
+  </div>
+
+  <script src="/survey.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ConvoSurvey</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/base.css">
+  <style>
+    .wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+    .hero { width: min(980px, 100%); display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; }
+    .hero h1 { font-size: clamp(34px, 6vw, 58px); letter-spacing: -0.03em; }
+    .hero p.lead { font-size: 18px; color: var(--muted); margin: 18px 0 26px; max-width: 46ch; }
+    .hero .cta { display: flex; gap: 10px; flex-wrap: wrap; }
+    .chat-demo { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: var(--shadow); display: grid; gap: 10px; }
+    .m { max-width: 88%; padding: 10px 14px; border-radius: 18px; }
+    .m.b { background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 6px; justify-self: start; }
+    .m.u { background: var(--primary); color: var(--on-primary); border-bottom-right-radius: 6px; justify-self: end; }
+    .m.a { background: none; border: 0; color: var(--muted); font-size: 14px; padding: 0 4px; justify-self: start; }
+    .wave { display: flex; align-items: center; gap: 3px; height: 28px; justify-self: end; padding: 6px 14px; background: var(--primary); border-radius: 18px; border-bottom-right-radius: 6px; }
+    .wave i { width: 3px; border-radius: 2px; background: var(--on-primary); opacity: 0.9; }
+    @media (max-width: 800px) { .hero { grid-template-columns: 1fr; gap: 28px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div>
+        <h1>Surveys people finish because they feel like a conversation.</h1>
+        <p class="lead">Ask one question at a time, let respondents answer by typing or speaking, and let an AI interviewer follow up when an answer needs more detail.</p>
+        <div class="cta">
+          <a class="btn primary" href="/admin">Open the admin dashboard</a>
+        </div>
+      </div>
+      <div class="chat-demo" aria-hidden="true">
+        <div class="m b">What stopped you from going back to the clinic?</div>
+        <div class="wave"><i style="height:8px"></i><i style="height:16px"></i><i style="height:22px"></i><i style="height:12px"></i><i style="height:20px"></i><i style="height:9px"></i><i style="height:15px"></i><i style="height:24px"></i><i style="height:11px"></i><i style="height:7px"></i></div>
+        <div class="m a">Transport money was a big part of it.</div>
+        <div class="m b">What would have made the trip easier for you?</div>
+        <div class="m u">Appointments closer to my market stall.</div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
