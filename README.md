@@ -8,10 +8,10 @@ Every question and every answer option can be read aloud, and structured answers
 Requires Node 22.13+.
 
     npm install
-    cp .env.example .env     # add GROQ_API_KEY (free, console.groq.com) and ADMIN_PASSWORD
+    cp .env.example .env     # add GROQ_API_KEY (free, console.groq.com) and SESSION_SECRET
     npm start                # http://localhost:3000
 
-- Admin: `/admin`   - Respondent link: `/s/<slug>`   - Test as the owner: `/s/<slug>?preview=1` (or the "Test" buttons)
+- Sign up / sign in: `/admin` (email + password, plus Google and Microsoft when configured)   - Respondent link: `/s/<slug>`   - Test as the owner: `/s/<slug>?preview=1` (or the "Test" buttons)
 
 ## For the form owner
 1. **Design with AI**: describe the study, pick length and language, and the AI drafts the questions, answer options,
@@ -41,18 +41,36 @@ Requires Node 22.13+.
 - **Graceful degradation.** No Groq key: plain acknowledgements, voice saved untranscribed. No speech voice: silent
   fallback. Mic blocked: tap and type still work.
 - **Observable.** Every model call is timed and logged as JSON; counters are on the admin status endpoint.
-- **Bounded and private.** Rate limits, upload limits, signed admin cookie, audio only via admin login, CSV formula
+- **Bounded and private.** Rate limits, upload limits, signed session cookie, per-user data isolation, audio only via admin login, CSV formula
   neutralisation, strict CSP, preview data purged.
 
+## Accounts and sign-in
+Anyone can create an account at `/admin`. Each account only sees its own surveys, responses and audio.
+
+- **Email + password**: passwords are stored as salted scrypt hashes.
+- **Google / Microsoft**: standard OpenID Connect. A button appears only when its client ID and secret are set.
+  1. Google: Google Cloud Console > APIs & Services > Credentials > OAuth client ID (Web application).
+  2. Microsoft: Entra admin center > App registrations > New registration, choose "Accounts in any organizational
+     directory and personal Microsoft accounts", add a client secret.
+  3. Register the redirect URI `<BASE_URL>/auth/google/callback` or `<BASE_URL>/auth/microsoft/callback`,
+     then set the `*_CLIENT_ID` / `*_CLIENT_SECRET` env vars and `BASE_URL`.
+- Signing in with Google using an email that already has a password account links to it and removes the password
+  (the address is now proven by Google). Microsoft never auto-links by email; use the original method.
+- Surveys created before accounts existed are assigned to `ADMIN_EMAIL`, or to the first account created.
+
 ## Deploy
-Needs a host that runs Node with a persistent disk (Render, Railway, Fly.io, a VPS). Mount the disk at `DATA_DIR`, set
-`NODE_ENV=production` and `TRUST_PROXY=1`, serve over HTTPS (browsers only allow the microphone on HTTPS). Back up `DATA_DIR`.
+Needs a host that runs Node with a **persistent disk** (Render, Railway, Fly.io, a VPS). Users, surveys, responses and
+audio all live in `DATA_DIR`; if that folder is not on a persistent disk, **everything is lost on every restart or deploy**.
+
+On Render: use a paid web service, add a Disk (e.g. mount path `/var/data`, 1 GB+), then set
+`DATA_DIR=/var/data`, `SESSION_SECRET`, `BASE_URL`, `NODE_ENV=production`, `TRUST_PROXY=1`. Serve over HTTPS
+(browsers only allow the microphone on HTTPS). Back up `DATA_DIR`.
 
 ## Tests
     npm test                 # matcher unit tests
     node test/mock-groq.js & # offline Groq stand-in
-    GROQ_BASE_URL=http://localhost:4010/v1 GROQ_API_KEY=x ADMIN_PASSWORD=pw PORT=3100 npm start &
-    BASE=http://localhost:3100 ADMIN_PASSWORD=pw npm run test:e2e
+    GROQ_BASE_URL=http://localhost:4010/v1 GROQ_API_KEY=x PORT=3100 npm start &
+    BASE=http://localhost:3100 npm run test:e2e
 
 ## Notes
 - Browser voices vary by device. Reading aloud works best in Chrome, Edge and Safari; some devices have no voice for

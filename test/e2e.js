@@ -1,8 +1,9 @@
 'use strict';
-// End-to-end API test. Usage: BASE=http://localhost:3000 ADMIN_PASSWORD=... node test/e2e.js
+// End-to-end API test. Usage: BASE=http://localhost:3000 node test/e2e.js
 const assert = require('assert');
 const BASE = process.env.BASE || 'http://localhost:3000';
-const PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const EMAIL = `owner-${Date.now()}@example.com`;
+const PASSWORD = 'correct horse battery';
 let cookie = '';
 
 async function call(method, path, body, { form, raw } = {}) {
@@ -24,10 +25,25 @@ const ok = (label) => console.log('  ok  ' + label);
   console.log('Admin');
   let r = await call('GET', '/api/admin/surveys');
   assert.equal(r.status, 401); ok('admin API rejects anonymous');
-  r = await call('POST', '/api/admin/login', { password: 'wrong' });
+  r = await call('POST', '/api/admin/signup', { email: 'not-an-email', password: PASSWORD });
+  assert.equal(r.status, 400); ok('bad email rejected');
+  r = await call('POST', '/api/admin/signup', { email: EMAIL, password: 'short' });
+  assert.equal(r.status, 400); ok('short password rejected');
+  r = await call('POST', '/api/admin/signup', { email: EMAIL, password: PASSWORD, name: 'Owner' });
+  assert.equal(r.status, 201); ok('sign up');
+  r = await call('POST', '/api/admin/signup', { email: EMAIL.toUpperCase(), password: PASSWORD });
+  assert.equal(r.status, 409); ok('duplicate email rejected (case-insensitive)');
+  cookie = '';
+  r = await call('POST', '/api/admin/login', { email: EMAIL, password: 'wrong password' });
   assert.equal(r.status, 401); ok('wrong password rejected');
-  r = await call('POST', '/api/admin/login', { password: PASSWORD });
+  r = await call('POST', '/api/admin/login', { email: 'nobody@example.com', password: PASSWORD });
+  assert.equal(r.status, 401); ok('unknown email rejected');
+  r = await call('POST', '/api/admin/login', { email: EMAIL, password: PASSWORD });
   assert.equal(r.status, 200); ok('login');
+  r = await call('GET', '/api/admin/me');
+  assert.equal(r.data.authenticated, true); assert.equal(r.data.user.email, EMAIL); ok('session identifies the user');
+  r = await call('GET', '/auth/google/start', undefined, { raw: true });
+  assert.ok([404, 302].includes(r.status)); ok('google start is 404 when unconfigured (or redirects when configured)');
 
   r = await call('POST', '/api/admin/surveys', { title: '', questions: [] });
   assert.equal(r.status, 400); ok('empty survey rejected');
@@ -175,6 +191,26 @@ const ok = (label) => console.log('  ok  ' + label);
 
   r = await call('POST', `/api/admin/surveys/${survey.id}/summarize`);
   console.log('  ..  summarize →', r.status, r.status === 200 ? '' : r.data.error);
+
+  console.log('Isolation');
+  const mine = cookie; cookie = '';
+  r = await call('POST', '/api/admin/signup', { email: `other-${Date.now()}@example.com`, password: PASSWORD });
+  assert.equal(r.status, 201);
+  r = await call('GET', '/api/admin/surveys');
+  assert.equal(r.data.length, 0); ok('a new user sees none of the other user\'s surveys');
+  r = await call('GET', `/api/admin/surveys/${survey.id}`);
+  assert.equal(r.status, 404); ok('cannot read another user\'s survey');
+  r = await call('PUT', `/api/admin/surveys/${survey.id}`, { title: 'hijack', questions: [{ type: 'open', text: 'x' }] });
+  assert.equal(r.status, 404); ok('cannot edit another user\'s survey');
+  r = await call('GET', `/api/admin/surveys/${survey.id}/export.csv`, undefined, { raw: true });
+  assert.equal(r.status, 404); ok('cannot export another user\'s responses');
+  r = await call('DELETE', `/api/admin/surveys/${survey.id}`);
+  assert.equal(r.status, 404); ok('cannot delete another user\'s survey');
+  r = await call('GET', `/api/admin/audio/${withAudio.audio}`, undefined, { raw: true });
+  assert.equal(r.status, 404); ok('cannot play another user\'s audio');
+  r = await call('POST', `/api/s/${survey.slug}/sessions`, { preview: true });
+  assert.equal(r.status, 403); ok('cannot preview another user\'s survey');
+  cookie = mine;
 
   r = await call('DELETE', `/api/admin/surveys/${survey.id}`);
   assert.equal(r.status, 200); ok('survey deleted');
