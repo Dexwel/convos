@@ -30,7 +30,7 @@
     let res;
     try { res = await fetch('/api/admin' + path, init); } catch { throw new Error('Network error. Check your connection.'); }
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && path !== '/login') { showLogin(); throw new Error('Please sign in.'); }
+    if (res.status === 401 && path !== '/login' && path !== '/signup') { showLogin(); throw new Error('Please sign in.'); }
     if (!res.ok) throw new Error(data.error || 'Request failed.');
     return data;
   }
@@ -45,21 +45,58 @@
   }
 
   // ---------- auth ----------
-  function showLogin() { $('#app').hidden = true; $('#login').hidden = false; setTimeout(() => $('#pw').focus(), 50); }
+  let mode = 'signin';
+  const AUTH_ERRORS = {
+    cancelled: 'Sign-in was cancelled.',
+    failed: 'Sign-in with that provider failed. Please try again.',
+    state: 'That sign-in link expired. Please try again.',
+    noemail: 'That account did not share an email address, so we could not sign you in.',
+    exists: 'An account with that email already exists. Sign in with your email and password instead, or use Google.',
+    unavailable: 'That sign-in method is not available.',
+  };
+  function setMode(m) {
+    mode = m;
+    const up = m === 'signup';
+    $('#name-field').hidden = !up;
+    $('#pw-hint').hidden = !up;
+    $('#pw').autocomplete = up ? 'new-password' : 'current-password';
+    $('#auth-submit').textContent = up ? 'Create account' : 'Sign in';
+    $('#auth-sub').textContent = up ? 'Create an account to start building surveys.' : 'Sign in to build surveys and read responses.';
+    $('#switch-text').textContent = up ? 'Already have an account?' : 'New here?';
+    $('#switch-mode').textContent = up ? 'Sign in' : 'Create an account';
+    $('#login-error').hidden = true;
+  }
+  async function showLogin(msg) {
+    $('#app').hidden = true; $('#login').hidden = false;
+    try {
+      const me = await fetch('/api/admin/me').then((r) => r.json());
+      const { google, microsoft } = me.providers || {};
+      $('#btn-google').hidden = !google; $('#btn-microsoft').hidden = !microsoft;
+      $('#social').hidden = !(google || microsoft);
+    } catch { /* email still works */ }
+    if (msg) { const box = $('#login-error'); box.textContent = msg; box.hidden = false; }
+    setTimeout(() => $('#em').focus(), 50);
+  }
+  $('#switch-mode').addEventListener('click', () => setMode(mode === 'signin' ? 'signup' : 'signin'));
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const box = $('#login-error'); box.hidden = true;
-    try { await api('/login', { method: 'POST', json: { password: $('#pw').value } }); $('#pw').value = ''; await enterApp(); }
+    const json = { email: $('#em').value, password: $('#pw').value };
+    if (mode === 'signup') json.name = $('#nm').value;
+    const btn = $('#auth-submit'); btn.disabled = true;
+    try { await api(mode === 'signup' ? '/signup' : '/login', { method: 'POST', json }); $('#pw').value = ''; await enterApp(); }
     catch (err) { box.textContent = err.message; box.hidden = false; }
+    finally { btn.disabled = false; }
   });
   $('#logout').addEventListener('click', async () => { await api('/logout', { method: 'POST' }).catch(() => {}); showLogin(); });
 
   async function enterApp() {
     $('#login').hidden = true; $('#app').hidden = false;
     try {
+      const me = await fetch('/api/admin/me').then((r) => r.json());
+      if (me.user) $('#who').textContent = me.user.name || me.user.email;
       const st = await api('/status');
       const parts = [];
-      if (st.defaultPassword) parts.push(h('span', {}, h('b', {}, 'Security: '), 'you are using the default admin password. Set ADMIN_PASSWORD in your .env file.'));
       if (!st.groq) parts.push(h('span', {}, h('b', {}, 'AI is off: '), 'add GROQ_API_KEY to .env to enable follow-up questions, voice transcription and summaries.'));
       const banner = $('#banner');
       banner.replaceChildren(...parts.flatMap((p, i) => (i ? [h('br'), p] : [p])));
@@ -354,8 +391,10 @@
   // ---------- boot ----------
   (async () => {
     try {
+      const err = new URLSearchParams(location.search).get('auth_error');
+      if (err) history.replaceState(null, '', '/admin' + location.hash);
       const me = await fetch('/api/admin/me').then((r) => r.json());
-      if (me.authenticated) await enterApp(); else showLogin();
+      if (me.authenticated) await enterApp(); else await showLogin(err ? (AUTH_ERRORS[err] || AUTH_ERRORS.failed) : undefined);
     } catch { showLogin(); }
   })();
 })();

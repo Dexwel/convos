@@ -24,6 +24,7 @@ const express = require('express');
 const multer = require('multer');
 const { DatabaseSync } = require('node:sqlite');
 const matcher = require('./lib/match');
+const auth = require('./lib/auth');
 
 // ---------- config ----------
 const PORT = Number(process.env.PORT || 3000);
@@ -35,11 +36,8 @@ const CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile';
 const STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const MAX_AUDIO_MB = Number(process.env.MAX_AUDIO_MB || 20);
 const IS_PROD = process.env.NODE_ENV === 'production';
-let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-if (!ADMIN_PASSWORD) {
-  ADMIN_PASSWORD = 'changeme';
-  console.warn('[warn] ADMIN_PASSWORD is not set — using the insecure default "changeme". Set it in .env before deploying.');
-}
+const BASE_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+const ADMIN_EMAIL = auth.normEmail(process.env.ADMIN_EMAIL || '');
 if (!GROQ_KEY) console.warn('[warn] GROQ_API_KEY is not set — surveys run with plain acknowledgements and voice answers are saved without transcription.');
 
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
@@ -48,6 +46,7 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 const SECRET_FILE = path.join(DATA_DIR, '.secret');
 let SECRET = process.env.SESSION_SECRET || '';
 if (!SECRET) {
+  if (IS_PROD) console.warn('[warn] SESSION_SECRET is not set. Sessions are signed with a key stored in DATA_DIR; set SESSION_SECRET so sign-ins survive a lost disk.');
   if (fs.existsSync(SECRET_FILE)) SECRET = fs.readFileSync(SECRET_FILE, 'utf8').trim();
   else {
     SECRET = crypto.randomBytes(32).toString('hex');
@@ -104,6 +103,21 @@ CREATE TABLE IF NOT EXISTS answers (
   duration_ms INTEGER,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  password_hash TEXT,
+  created_at INTEGER NOT NULL,
+  last_login_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS identities (
+  provider TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, subject)
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_survey ON sessions(survey_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
@@ -112,9 +126,15 @@ CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
 for (const ddl of [
   'ALTER TABLE sessions ADD COLUMN preview INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE answers ADD COLUMN transcript TEXT',
+  'ALTER TABLE surveys ADD COLUMN owner_id TEXT REFERENCES users(id) ON DELETE CASCADE',
 ]) { try { db.exec(ddl); } catch { /* column already exists */ } }
 
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_surveys_owner ON surveys(owner_id)'); } catch { /* ignore */ }
+
 const q = {
+  userById: db.prepare('SELECT * FROM users WHERE id = ?'),
+  userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+  identity: db.prepare('SELECT * FROM identities WHERE provider = ? AND subject = ?'),
   surveyById: db.prepare('SELECT * FROM surveys WHERE id = ?'),
   surveyBySlug: db.prepare('SELECT * FROM surveys WHERE slug = ?'),
   sessionById: db.prepare('SELECT * FROM sessions WHERE id = ?'),
@@ -150,21 +170,10 @@ function rateLimit(bucket, limit, windowMs) {
 }
 setInterval(() => { const t = now(); for (const [k, v] of hits) if (v.reset < t) hits.delete(k); }, 60_000).unref();
 
-// ---------- admin auth (signed cookie) ----------
-const sign = (payload) => crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
-function makeToken() {
-  const exp = String(now() + 1000 * 60 * 60 * 24 * 7);
-  return exp + '.' + sign(exp);
-}
-function validToken(tok) {
-  if (!tok || typeof tok !== 'string') return false;
-  const [exp, sig] = tok.split('.');
-  if (!exp || !sig) return false;
-  const expected = sign(exp);
-  const a = Buffer.from(sig), b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
-  return Number(exp) > now();
-}
+// ---------- accounts & sessions (signed cookie) ----------
+const tools = auth.makeSessionTools(SECRET);
+const SESSION_COOKIE = 'cs_session';
+const STATE_COOKIE = 'cs_oauth';
 function cookie(req, name) {
   const raw = req.headers.cookie || '';
   for (const part of raw.split(';')) {
@@ -173,13 +182,46 @@ function cookie(req, name) {
   }
   return '';
 }
-const requireAdmin = (req, res, next) =>
-  validToken(cookie(req, 'cs_admin')) ? next() : next(new HttpError(401, 'Please sign in.'));
+const isSecure = (req) => IS_PROD || req.headers['x-forwarded-proto'] === 'https' || BASE_URL.startsWith('https://');
+function setCookie(req, res, name, value, maxAgeSec) {
+  const c = `${name}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${isSecure(req) ? '; Secure' : ''}`;
+  const prev = res.getHeader('Set-Cookie');
+  res.setHeader('Set-Cookie', prev ? [].concat(prev, c) : c);
+}
+const startSession = (req, res, userId) => setCookie(req, res, SESSION_COOKIE, tools.makeSession(userId), 7 * 86400);
+const currentUser = (req) => {
+  const id = tools.readSession(cookie(req, SESSION_COOKIE));
+  return id ? q.userById.get(id) || null : null;
+};
+const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, hasPassword: !!u.password_hash });
+const requireUser = (req, res, next) => {
+  const u = currentUser(req);
+  if (!u) return next(new HttpError(401, 'Please sign in.'));
+  req.user = u;
+  next();
+};
 
-function passwordMatches(input) {
-  const a = crypto.createHash('sha256').update(String(input)).digest();
-  const b = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
-  return crypto.timingSafeEqual(a, b);
+/** Surveys created before accounts existed have no owner. They go to ADMIN_EMAIL, or to the very first account. */
+function claimLegacySurveys(user, isFirstUser) {
+  if (!(isFirstUser || (ADMIN_EMAIL && user.email === ADMIN_EMAIL))) return;
+  db.prepare('UPDATE surveys SET owner_id = ? WHERE owner_id IS NULL').run(user.id);
+}
+function createUser({ email, name, passwordHash }) {
+  const isFirstUser = db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
+  const id = rid(14);
+  db.prepare('INSERT INTO users (id, email, name, password_hash, created_at, last_login_at) VALUES (?,?,?,?,?,?)')
+    .run(id, email, name || '', passwordHash || null, now(), now());
+  const user = q.userById.get(id);
+  claimLegacySurveys(user, isFirstUser);
+  return user;
+}
+// legacy owner (ADMIN_EMAIL) signing in later still receives orphaned surveys
+const touchLogin = (user) => { db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now(), user.id); claimLegacySurveys(user, false); };
+
+function ownedSurvey(req, id = req.params.id) {
+  const row = q.surveyById.get(id);
+  if (!row || row.owner_id !== req.user.id) throw new HttpError(404, 'Survey not found.');
+  return row;
 }
 
 // ---------- survey config validation ----------
@@ -527,7 +569,10 @@ pub.post('/s/:slug/sessions', rateLimit('newsess', 60, 10 * 60_000), wrap((req, 
   const row = q.surveyBySlug.get(req.params.slug);
   if (!row) throw new HttpError(404, 'This survey does not exist.');
   const preview = req.body?.preview === true;
-  if (preview && !validToken(cookie(req, 'cs_admin'))) throw new HttpError(403, 'Sign in to the admin dashboard to run a test preview.');
+  if (preview) {
+    const u = currentUser(req);
+    if (!u || u.id !== row.owner_id) throw new HttpError(403, 'Sign in as the survey owner to run a test preview.');
+  }
   if (!preview && row.status !== 'live') throw new HttpError(403, row.status === 'closed' ? 'This survey has closed.' : 'This survey is not open yet.');
   const cfg = safeJSON(row.config, {});
   if (cfg.consent && req.body?.consent !== true) throw new HttpError(400, 'Consent is required to take part.');
@@ -678,28 +723,103 @@ app.use('/api', pub);
 // ===== admin API =====
 const adm = express.Router();
 
+adm.post('/signup', rateLimit('signup', 10, 60 * 60_000), (req, res, next) => {
+  const email = auth.normEmail(req.body?.email);
+  const password = req.body?.password;
+  const name = clampStr(req.body?.name, 120);
+  if (!auth.validEmail(email)) return next(new HttpError(400, 'Enter a valid email address.'));
+  const bad = auth.passwordProblem(password);
+  if (bad) return next(new HttpError(400, bad));
+  if (q.userByEmail.get(email)) return next(new HttpError(409, 'An account with this email already exists. Try signing in.'));
+  const user = createUser({ email, name, passwordHash: auth.hashPassword(password) });
+  startSession(req, res, user.id);
+  res.status(201).json({ ok: true, user: publicUser(user) });
+});
+
 adm.post('/login', rateLimit('login', 10, 15 * 60_000), (req, res, next) => {
-  if (!passwordMatches(req.body?.password ?? '')) return next(new HttpError(401, 'That password is not correct.'));
-  const secure = IS_PROD || req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader('Set-Cookie', `cs_admin=${encodeURIComponent(makeToken())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 86400}${secure ? '; Secure' : ''}`);
-  res.json({ ok: true });
+  const email = auth.normEmail(req.body?.email);
+  const user = email ? q.userByEmail.get(email) : null;
+  const ok = auth.verifyPassword(String(req.body?.password ?? ''), user?.password_hash || auth.DUMMY_HASH) && !!user?.password_hash;
+  if (!ok) {
+    const social = user && !user.password_hash;
+    return next(new HttpError(401, social ? 'This account uses Google or Microsoft sign-in. Use that button instead.' : 'Email or password is not correct.'));
+  }
+  touchLogin(user);
+  startSession(req, res, user.id);
+  res.json({ ok: true, user: publicUser(user) });
 });
 adm.post('/logout', (req, res) => {
-  res.setHeader('Set-Cookie', 'cs_admin=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+  setCookie(req, res, SESSION_COOKIE, '', 0);
   res.json({ ok: true });
 });
-adm.get('/me', (req, res) => res.json({ authenticated: validToken(cookie(req, 'cs_admin')) }));
+adm.get('/me', (req, res) => {
+  const u = currentUser(req);
+  res.json({
+    authenticated: !!u,
+    user: u ? publicUser(u) : null,
+    providers: { google: auth.providerConfigured('google'), microsoft: auth.providerConfigured('microsoft') },
+  });
+});
 
-adm.use(requireAdmin);
+// ----- Google / Microsoft sign-in (OpenID Connect, authorization-code flow) -----
+const redirectUri = (req, name) => `${BASE_URL || `${req.protocol}://${req.get('host')}`}/auth/${name}/callback`;
+const authErr = (res, code) => res.redirect(`/admin?auth_error=${encodeURIComponent(code)}`);
 
-adm.get('/status', (req, res) => res.json({ metrics, groq: !!GROQ_KEY, chatModel: CHAT_MODEL, sttModel: STT_MODEL, defaultPassword: !process.env.ADMIN_PASSWORD }));
+app.get('/auth/:provider/start', rateLimit('oauth', 30, 10 * 60_000), (req, res, next) => {
+  const name = req.params.provider;
+  if (!auth.PROVIDERS[name] || !auth.providerConfigured(name)) return next(new HttpError(404, 'That sign-in method is not set up.'));
+  const st = tools.makeState(name);
+  setCookie(req, res, STATE_COOKIE, st.value, 600);
+  res.redirect(auth.authorizeUrl(name, redirectUri(req, name), st.value));
+});
+
+app.get('/auth/:provider/callback', rateLimit('oauth', 30, 10 * 60_000), wrap(async (req, res) => {
+  const name = req.params.provider;
+  if (!auth.PROVIDERS[name] || !auth.providerConfigured(name)) return authErr(res, 'unavailable');
+  const stateCookie = cookie(req, STATE_COOKIE);
+  setCookie(req, res, STATE_COOKIE, '', 0);
+  if (req.query.error) return authErr(res, req.query.error === 'access_denied' ? 'cancelled' : 'failed');
+  if (!stateCookie || req.query.state !== stateCookie || !tools.checkState(stateCookie, name) || typeof req.query.code !== 'string') return authErr(res, 'state');
+
+  let profile;
+  try { profile = await auth.fetchProfile(name, req.query.code, redirectUri(req, name)); }
+  catch (e) { console.warn(`[auth] ${name} sign-in failed:`, e.message); return authErr(res, 'failed'); }
+  if (!profile.email || !auth.validEmail(profile.email)) return authErr(res, 'noemail');
+
+  let user;
+  const linked = q.identity.get(name, profile.sub);
+  if (linked) {
+    user = q.userById.get(linked.user_id);
+  } else {
+    const existing = q.userByEmail.get(profile.email);
+    if (existing) {
+      // Only link to an existing account when the provider vouches for the email.
+      if (!profile.emailVerified) return authErr(res, 'exists');
+      // The account may have been registered by someone who never proved they own the address,
+      // so drop its password: the verified owner is now the only one who can sign in.
+      db.prepare('UPDATE users SET password_hash = NULL WHERE id = ?').run(existing.id);
+      user = existing;
+    } else {
+      user = createUser({ email: profile.email, name: profile.name, passwordHash: null });
+    }
+    db.prepare('INSERT INTO identities (provider, subject, user_id, created_at) VALUES (?,?,?,?)').run(name, profile.sub, user.id, now());
+  }
+  if (!user) return authErr(res, 'failed');
+  touchLogin(user);
+  startSession(req, res, user.id);
+  res.redirect('/admin');
+}));
+
+adm.use(requireUser);
+
+adm.get('/status', (req, res) => res.json({ metrics, groq: !!GROQ_KEY, chatModel: CHAT_MODEL, sttModel: STT_MODEL, dataDir: DATA_DIR }));
 
 adm.get('/surveys', (req, res) => {
   const rows = db.prepare(`
     SELECT s.*,
       (SELECT COUNT(*) FROM sessions x WHERE x.survey_id = s.id AND x.preview = 0) AS started,
       (SELECT COUNT(*) FROM sessions x WHERE x.survey_id = s.id AND x.preview = 0 AND x.status = 'completed') AS completed
-    FROM surveys s ORDER BY s.updated_at DESC`).all();
+    FROM surveys s WHERE s.owner_id = ? ORDER BY s.updated_at DESC`).all(req.user.id);
   res.json(rows.map((r) => ({
     id: r.id, slug: r.slug, title: r.title, status: r.status, updated_at: r.updated_at,
     questions: (safeJSON(r.config, {}).questions || []).length, started: r.started, completed: r.completed,
@@ -712,20 +832,18 @@ adm.post('/surveys', (req, res) => {
   let slug = rid(8);
   while (q.surveyBySlug.get(slug)) slug = rid(8);
   const t = now();
-  db.prepare('INSERT INTO surveys (id, slug, title, config, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
-    .run(id, slug, title, JSON.stringify(config), 'draft', t, t);
+  db.prepare('INSERT INTO surveys (id, slug, title, config, status, owner_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, slug, title, JSON.stringify(config), 'draft', req.user.id, t, t);
   res.status(201).json(adminSurvey(q.surveyById.get(id)));
 });
 
 adm.get('/surveys/:id', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   res.json(adminSurvey(row));
 });
 
 adm.put('/surveys/:id', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const { title, config } = sanitizeSurvey(req.body || {});
   const status = ['draft', 'live', 'closed'].includes(req.body?.status) ? req.body.status : row.status;
   db.prepare('UPDATE surveys SET title=?, config=?, status=?, updated_at=? WHERE id=?').run(title, JSON.stringify(config), status, now(), row.id);
@@ -733,30 +851,27 @@ adm.put('/surveys/:id', (req, res) => {
 });
 
 adm.patch('/surveys/:id/status', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   if (!['draft', 'live', 'closed'].includes(req.body?.status)) throw new HttpError(400, 'Invalid status.');
   db.prepare('UPDATE surveys SET status=?, updated_at=? WHERE id=?').run(req.body.status, now(), row.id);
   res.json({ ok: true, status: req.body.status });
 });
 
 adm.post('/surveys/:id/duplicate', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const id = rid(12);
   let slug = rid(8);
   while (q.surveyBySlug.get(slug)) slug = rid(8);
   const t = now();
-  db.prepare('INSERT INTO surveys (id, slug, title, config, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
-    .run(id, slug, (row.title + ' (copy)').slice(0, 140), row.config, 'draft', t, t);
+  db.prepare('INSERT INTO surveys (id, slug, title, config, status, owner_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, slug, (row.title + ' (copy)').slice(0, 140), row.config, 'draft', req.user.id, t, t);
   res.status(201).json(adminSurvey(q.surveyById.get(id)));
 });
 
 const removeAudio = (files) => files.forEach((f) => fs.rm(path.join(AUDIO_DIR, path.basename(f)), { force: true }, () => {}));
 
 adm.delete('/surveys/:id', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const files = audioFilesForSessions('survey_id = ?', row.id);
   db.prepare('DELETE FROM surveys WHERE id = ?').run(row.id);
   removeAudio(files);
@@ -775,14 +890,14 @@ function loadResponses(survey, limit = 1000) {
 }
 
 adm.get('/surveys/:id/responses', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   res.json({ survey: adminSurvey(row), responses: loadResponses(row, 500) });
 });
 
 adm.delete('/sessions/:sid', (req, res) => {
   const sess = q.sessionById.get(req.params.sid);
   if (!sess) throw new HttpError(404, 'Response not found.');
+  ownedSurvey(req, sess.survey_id);
   const files = audioFilesForSessions('id = ?', sess.id);
   db.prepare('DELETE FROM sessions WHERE id = ?').run(sess.id);
   removeAudio(files);
@@ -790,8 +905,7 @@ adm.delete('/sessions/:sid', (req, res) => {
 });
 
 adm.get('/surveys/:id/stats', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const cfg = safeJSON(row.config, {});
   const sessions = db.prepare('SELECT status, started_at, completed_at FROM sessions WHERE survey_id = ? AND preview = 0').all(row.id);
   const completed = sessions.filter((s) => s.status === 'completed');
@@ -832,8 +946,7 @@ const csvCell = (v) => {
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 adm.get('/surveys/:id/export.csv', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const cfg = safeJSON(row.config, {});
   const responses = loadResponses(row, 100000);
   const header = ['response_id', 'status', 'started_at', 'completed_at',
@@ -858,8 +971,7 @@ adm.get('/surveys/:id/export.csv', (req, res) => {
   res.send('﻿' + lines.join('\r\n'));
 });
 adm.get('/surveys/:id/export.json', (req, res) => {
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   res.setHeader('Content-Disposition', `attachment; filename="${row.slug}-responses.json"`);
   res.json({ survey: adminSurvey(row), responses: loadResponses(row, 100000) });
 });
@@ -867,6 +979,8 @@ adm.get('/surveys/:id/export.json', (req, res) => {
 adm.get('/audio/:file', (req, res, next) => {
   const f = path.basename(req.params.file);
   if (!/^[a-z0-9]{10,32}\.(webm|ogg|m4a|mp3|wav|flac)$/.test(f)) return next(new HttpError(404, 'Not found.'));
+  const owns = db.prepare('SELECT 1 FROM answers a JOIN sessions s ON s.id = a.session_id JOIN surveys v ON v.id = s.survey_id WHERE a.audio = ? AND v.owner_id = ?').get(f, req.user.id);
+  if (!owns) return next(new HttpError(404, 'Audio file not found.'));
   const full = path.join(AUDIO_DIR, f);
   if (!fs.existsSync(full)) return next(new HttpError(404, 'Audio file not found.'));
   res.sendFile(full);
@@ -875,8 +989,7 @@ adm.get('/audio/:file', (req, res, next) => {
 // AI theme summary of open-ended answers
 adm.post('/surveys/:id/summarize', wrap(async (req, res) => {
   if (!GROQ_KEY) throw new HttpError(400, 'Add a GROQ_API_KEY to use AI summaries.');
-  const row = q.surveyById.get(req.params.id);
-  if (!row) throw new HttpError(404, 'Survey not found.');
+  const row = ownedSurvey(req);
   const cfg = safeJSON(row.config, {});
   const out = [];
   for (const qu of cfg.questions.filter((x) => x.type === 'open')) {
