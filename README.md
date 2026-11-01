@@ -56,7 +56,8 @@ Anyone can create an account at `/admin`. Each account only sees its own surveys
      then set the `*_CLIENT_ID` / `*_CLIENT_SECRET` env vars and `BASE_URL`.
 - Signing in with Google using an email that already has a password account links to it and removes the password
   (the address is now proven by Google). Microsoft never auto-links by email; use the original method.
-- Surveys created before accounts existed are assigned to `ADMIN_EMAIL`, or to the first account created.
+- Surveys created before accounts existed stay unassigned until an operator performs a verified, reviewed migration.
+  Public signup never claims legacy surveys or their responses.
 
 ## Deploy
 Needs a host that runs Node with a **persistent disk** (Render, Railway, Fly.io, a VPS). Users, surveys, responses and

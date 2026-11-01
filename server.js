@@ -37,7 +37,6 @@ const STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const MAX_AUDIO_MB = Number(process.env.MAX_AUDIO_MB || 20);
 const IS_PROD = process.env.NODE_ENV === 'production';
 const BASE_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
-const ADMIN_EMAIL = auth.normEmail(process.env.ADMIN_EMAIL || '');
 if (!GROQ_KEY) console.warn('[warn] GROQ_API_KEY is not set — surveys run with plain acknowledgements and voice answers are saved without transcription.');
 
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
@@ -201,22 +200,13 @@ const requireUser = (req, res, next) => {
   next();
 };
 
-/** Surveys created before accounts existed have no owner. They go to ADMIN_EMAIL, or to the very first account. */
-function claimLegacySurveys(user, isFirstUser) {
-  if (!(isFirstUser || (ADMIN_EMAIL && user.email === ADMIN_EMAIL))) return;
-  db.prepare('UPDATE surveys SET owner_id = ? WHERE owner_id IS NULL').run(user.id);
-}
 function createUser({ email, name, passwordHash }) {
-  const isFirstUser = db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
   const id = rid(14);
   db.prepare('INSERT INTO users (id, email, name, password_hash, created_at, last_login_at) VALUES (?,?,?,?,?,?)')
     .run(id, email, name || '', passwordHash || null, now(), now());
-  const user = q.userById.get(id);
-  claimLegacySurveys(user, isFirstUser);
-  return user;
+  return q.userById.get(id);
 }
-// legacy owner (ADMIN_EMAIL) signing in later still receives orphaned surveys
-const touchLogin = (user) => { db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now(), user.id); claimLegacySurveys(user, false); };
+const touchLogin = (user) => { db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now(), user.id); };
 
 function ownedSurvey(req, id = req.params.id) {
   const row = q.surveyById.get(id);
