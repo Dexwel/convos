@@ -36,6 +36,9 @@ const STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const MAX_AUDIO_MB = Number(process.env.MAX_AUDIO_MB || 20);
 const IS_PROD = process.env.NODE_ENV === 'production';
 let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+if (IS_PROD && !ADMIN_PASSWORD.trim()) {
+  throw new Error('ADMIN_PASSWORD must be set in production. Refusing to start with an insecure default credential.');
+}
 if (!ADMIN_PASSWORD) {
   ADMIN_PASSWORD = 'changeme';
   console.warn('[warn] ADMIN_PASSWORD is not set — using the insecure default "changeme". Set it in .env before deploying.');

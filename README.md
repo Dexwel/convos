@@ -8,10 +8,31 @@ Every question and every answer option can be read aloud, and structured answers
 Requires Node 22.13+.
 
     npm install
-    cp .env.example .env     # add GROQ_API_KEY (free, console.groq.com) and ADMIN_PASSWORD
+    cp .env.example .env     # set a strong, private ADMIN_PASSWORD
     npm start                # http://localhost:3000
 
 - Admin: `/admin`   - Respondent link: `/s/<slug>`   - Test as the owner: `/s/<slug>?preview=1` (or the "Test" buttons)
+
+## Customer accounts and data safety
+
+The current `/admin` is a single-owner pilot, not a customer account system. It uses a shared password and a local
+SQLite database; it has no customer workspaces or survey-level tenant isolation. Do not invite customers to use it.
+Google/Microsoft sign-in and customer signup are not enabled in this legacy app.
+
+The additive Supabase migrations under `supabase/migrations/` are staging foundations only. Verified Supabase users
+receive one personal workspace, but the existing survey, response, and audio APIs are not yet connected to Supabase or
+workspace authorization. Applying these migrations does not migrate, back up, or change the existing SQLite database.
+Do not treat this repository as a customer-ready multi-tenant SaaS until the workspace-scoped data APIs, OAuth/email
+provider configuration, Postgres RLS tests, and restore-tested legacy migration are complete.
+
+For the existing Render pilot, configure a persistent disk and set `DATA_DIR` to its mount path (for example
+`/var/data`). SQLite, its WAL files, the signing secret, and recordings must all live on that disk. Back up the disk
+and test restoring the database and audio together. A deploy without a persistent disk can lose local files; a Supabase
+identity migration alone does not provide application-data persistence.
+
+The founder creates and stores Supabase, Google, and Microsoft credentials in the staging provider dashboards and
+Render's secret manager. Never put service-role keys, OAuth client secrets, or production credentials in browser code,
+`.env.example`, source control, or chat. Keep the existing Render service and data untouched while staging is built.
 
 ## For the form owner
 1. **Design with AI**: describe the study, pick length and language, and the AI drafts the questions, answer options,
@@ -49,7 +70,8 @@ Needs a host that runs Node with a persistent disk (Render, Railway, Fly.io, a V
 `NODE_ENV=production` and `TRUST_PROXY=1`, serve over HTTPS (browsers only allow the microphone on HTTPS). Back up `DATA_DIR`.
 
 ## Tests
-    npm test                 # matcher unit tests
+    npm test                 # deterministic unit and startup-security tests
+    supabase test db         # onboarding/RLS database tests (requires Supabase CLI and local Supabase)
     node test/mock-groq.js & # offline Groq stand-in
     GROQ_BASE_URL=http://localhost:4010/v1 GROQ_API_KEY=x ADMIN_PASSWORD=pw PORT=3100 npm start &
     BASE=http://localhost:3100 ADMIN_PASSWORD=pw npm run test:e2e
